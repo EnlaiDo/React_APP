@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from services.cmc import get_price, get_trending
 from services.ai import ask_ai
 from services.symbol_to_cg_id import CMC_TO_CG
+from database import initialize_database
 
 load_dotenv()
 app = FastAPI()
@@ -27,6 +28,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup_event():
+    initialize_database()
 
 
 # --- MODELS ---
