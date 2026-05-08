@@ -1,9 +1,9 @@
-from database import get_db_path, initialize_database
+from database import DB_PATH, initialize_database
 
 
 def main() -> None:
     initialize_database()
-    print(f"SQLite database initialized at {get_db_path()}")
+    print(f"SQLite database initialized at {DB_PATH}")
 
 
 if __name__ == "__main__":

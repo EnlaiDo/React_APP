@@ -1,6 +1,6 @@
 {
     "username": "Do",
-    "balance_usd": 49999.98603695337,
+    "balance_usd": 42564.77194024764,
     "portfolio": {
         "BTC": {
             "amount": 0.5,
@@ -15,6 +15,9 @@
         },
         "GROK": {
             "amount": 200.0
+        },
+        "CAT": {
+            "amount": 20.0
         }
     },
     "watchlist": [
