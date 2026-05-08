@@ -52,6 +52,11 @@ async def _coingecko_get(path: str, params: dict[str, Any]) -> Any:
 
 async def get_price(coingecko_id: str) -> Decimal:
     normalized_id = coingecko_id.strip().lower()
+    if not normalized_id:
+        raise ValueError("Invalid coingecko_id")
+    if normalized_id.upper() in CMC_TO_CG:
+        raise ValueError("Invalid coingecko_id")
+
     cached = _price_cache.get(normalized_id)
     if cached and _cache_valid(cached[0], PRICE_TTL_SECONDS):
         return cached[1]
@@ -61,15 +66,39 @@ async def get_price(coingecko_id: str) -> Decimal:
             "/simple/price",
             {"ids": normalized_id, "vs_currencies": "usd"},
         )
+        if normalized_id not in data:
+            raise KeyError(normalized_id)
+        if "usd" not in data[normalized_id]:
+            raise ValueError("Price unavailable: missing USD quote")
         price = _to_decimal(data[normalized_id]["usd"])
-    except Exception:
+    except KeyError as exc:
+        raise ValueError("Invalid coingecko_id") from exc
+    except httpx.HTTPStatusError as exc:
         symbol = _symbol_for_coingecko_id(normalized_id)
         if not symbol:
-            raise ValueError("Price unavailable")
+            raise ValueError(f"Price unavailable: HTTP {exc.response.status_code}") from exc
         fallback_price, err = cmc.get_price(symbol)
         if err or fallback_price is None:
-            raise ValueError("Price unavailable")
+            raise ValueError(f"Price unavailable: {err or 'fallback returned no price'}") from exc
         price = _to_decimal(fallback_price)
+    except httpx.TimeoutException as exc:
+        symbol = _symbol_for_coingecko_id(normalized_id)
+        if not symbol:
+            raise ValueError("Price unavailable: CoinGecko timeout") from exc
+        fallback_price, err = cmc.get_price(symbol)
+        if err or fallback_price is None:
+            raise ValueError(f"Price unavailable: {err or 'fallback returned no price'}") from exc
+        price = _to_decimal(fallback_price)
+    except httpx.RequestError as exc:
+        symbol = _symbol_for_coingecko_id(normalized_id)
+        if not symbol:
+            raise ValueError(f"Price unavailable: {exc}") from exc
+        fallback_price, err = cmc.get_price(symbol)
+        if err or fallback_price is None:
+            raise ValueError(f"Price unavailable: {err or 'fallback returned no price'}") from exc
+        price = _to_decimal(fallback_price)
+    except ValueError:
+        raise
 
     _price_cache[normalized_id] = (_now_ns(), price)
     return price
@@ -115,6 +144,13 @@ async def get_market_data() -> list[dict[str, Any]]:
                 "price_change_percentage": "24h",
             },
         )
+    except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.RequestError):
+        fallback, err = cmc.get_trending(limit=20)
+        if err or fallback is None:
+            market = []
+        else:
+            market = _normalize_cmc_market(fallback)
+    else:
         market = []
         for coin in data:
             price = _to_decimal(coin.get("current_price", "0"))
@@ -136,12 +172,6 @@ async def get_market_data() -> list[dict[str, Any]]:
                     "sparkline": [],
                 }
             )
-    except Exception:
-        fallback, err = cmc.get_trending(limit=20)
-        if err or fallback is None:
-            market = []
-        else:
-            market = _normalize_cmc_market(fallback)
 
     _market_cache = (_now_ns(), market)
     return market

@@ -14,6 +14,7 @@ from services.ledger_service import (
     get_user_balance,
 )
 from services.price_service import get_market_data, get_price
+from services.symbol_to_cg_id import CMC_TO_CG
 
 
 load_dotenv()
@@ -54,16 +55,24 @@ async def get_market():
     return await get_market_data()
 
 
-@app.get("/api/coin/{coingecko_id}")
-async def get_coin_detail(coingecko_id: str, days: str = "7"):
+@app.get("/api/coin/{symbol}")
+async def get_coin_detail(symbol: str, days: str = "7"):
     _ = days
+    display_symbol = symbol.strip().upper()
+    mapped_id = CMC_TO_CG.get(display_symbol)
+    if not mapped_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Unknown asset. Missing coingecko_id mapping.",
+        )
+
     try:
-        price = await get_price(coingecko_id)
+        price = await get_price(mapped_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {
-        "coingecko_id": coingecko_id,
-        "symbol": coingecko_id.upper(),
+        "coingecko_id": mapped_id,
+        "symbol": display_symbol,
         "price": _decimal_response(price),
         "history": [],
         "change_24h": "0",
