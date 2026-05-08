@@ -1,0 +1,32 @@
+# --- GLOBAL / SYSTEM ---
+.DS_Store
+Thumbs.db
+
+# --- BACKEND (Python) ---
+backend/.env
+backend/__pycache__/
+backend/.venv/
+backend/*.py[cod]
+
+
+# --- FRONTEND (React/Vite) ---
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+env/
+.env
+
+# PyCharm settings
+.idea/
+
+# SQLite Database (Keep your "fake" trades local!)
+*.sqlite3
+*.db

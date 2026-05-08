@@ -1,0 +1,27 @@
+{
+    "username": "Do",
+    "balance_usd": 49999.98603695337,
+    "portfolio": {
+        "BTC": {
+            "amount": 0.5,
+            "avg_buy_price": 45000
+        },
+        "PEOPLE": {
+            "amount": 1.0,
+            "avg_buy_price": 0.010368990888527647
+        },
+        "XRP": {
+            "amount": 200.0
+        },
+        "GROK": {
+            "amount": 200.0
+        }
+    },
+    "watchlist": [
+        "ETH",
+        "SOL",
+        "DOGE",
+        "PEOPLE"
+    ],
+    "favorites": []
+}
