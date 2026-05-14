@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   TrendingUp,
@@ -46,6 +46,29 @@ const TimeSelector = ({ active, onChange }) => (
 const EmptyChart = ({ children }) => (
   <div className="empty-chart">{children || 'No chart data available yet.'}</div>
 );
+
+const PortfolioTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0].payload;
+  const change = Number(point.normalizedChange || 0);
+
+  return (
+    <div className="portfolio-tooltip">
+      <div className="tooltip-date">{point.time}</div>
+      <div className="tooltip-row">
+        <span>Portfolio value</span>
+        <strong>${formatCurrency(point.value)}</strong>
+      </div>
+      <div className="tooltip-row">
+        <span>Change</span>
+        <strong className={change >= 0 ? 'pos' : 'neg'}>
+          {change >= 0 ? '+' : ''}{change.toFixed(4)}%
+        </strong>
+      </div>
+    </div>
+  );
+};
 
 const TradeModal = ({ action, coin, loading, error, onClose, onSubmit }) => {
   const [quantity, setQuantity] = useState('');
@@ -116,6 +139,38 @@ export default function App() {
     executeTrade,
     getAiInsight,
   } = useTradingStore();
+
+  const portfolioChartData = useMemo(() => {
+    if (!portfolioHistory.length) return [];
+
+    const baseline = Number(portfolioHistory[0].value);
+    if (!Number.isFinite(baseline) || baseline === 0) {
+      return portfolioHistory.map((point) => ({
+        ...point,
+        normalizedChange: 0,
+      }));
+    }
+
+    return portfolioHistory.map((point) => {
+      const value = Number(point.value);
+      return {
+        ...point,
+        normalizedChange: ((value - baseline) / baseline) * 100,
+      };
+    });
+  }, [portfolioHistory]);
+
+  const portfolioChartDomain = useMemo(() => {
+    if (!portfolioChartData.length) return [-1, 1];
+
+    const values = portfolioChartData.map((point) => point.normalizedChange);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const spread = max - min;
+    const padding = spread === 0 ? 0.05 : Math.max(spread * 0.15, 0.01);
+
+    return [min - padding, max + padding];
+  }, [portfolioChartData]);
 
   useEffect(() => {
     loadMarket();
@@ -369,19 +424,38 @@ export default function App() {
                   <TimeSelector active={portTimeframe} onChange={setPortTimeframe} />
                 </div>
                 <div className="chart-container">
-                  {portfolioHistory.length ? (
+                  {portfolioChartData.length ? (
                     <ResponsiveContainer width="100%" height={250}>
-                      <AreaChart data={portfolioHistory}>
+                      <AreaChart data={portfolioChartData} margin={{ top: 12, right: 18, bottom: 4, left: 0 }}>
                         <defs>
                           <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.36}/>
                             <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
-                        <XAxis dataKey="time" tick={{ fill: '#525252', fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333' }} />
-                        <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#colorNet)" />
+                        <CartesianGrid strokeDasharray="2 6" stroke="rgba(82, 82, 91, 0.35)" vertical={false} />
+                        <XAxis dataKey="time" tick={{ fill: '#71717a', fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <YAxis
+                          dataKey="normalizedChange"
+                          domain={portfolioChartDomain}
+                          tickFormatter={(value) => `${Number(value).toFixed(3)}%`}
+                          tick={{ fill: '#71717a', fontSize: 12 }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={64}
+                        />
+                        <Tooltip content={<PortfolioTooltip />} cursor={{ stroke: '#52525b', strokeDasharray: '4 4' }} />
+                        <Area
+                          type="monotone"
+                          dataKey="normalizedChange"
+                          stroke="#3b82f6"
+                          strokeWidth={2.5}
+                          fill="url(#colorNet)"
+                          dot={false}
+                          activeDot={{ r: 5, stroke: '#bfdbfe', strokeWidth: 2, fill: '#3b82f6' }}
+                          animationDuration={550}
+                          animationEasing="ease-out"
+                        />
                       </AreaChart>
                     </ResponsiveContainer>
                   ) : (

@@ -159,6 +159,44 @@ body {
   margin: 4px 0 0 0;
 }
 
+.portfolio-tooltip {
+  min-width: 190px;
+  background: rgba(9, 9, 11, 0.94);
+  border: 1px solid rgba(82, 82, 91, 0.8);
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.tooltip-date {
+  color: var(--text-main);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.tooltip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.tooltip-row strong {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.tooltip-row strong.pos {
+  color: var(--primary);
+}
+
+.tooltip-row strong.neg {
+  color: var(--danger);
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
