@@ -9,11 +9,10 @@ from pydantic import BaseModel
 from database import initialize_database
 from services.ai import ask_ai
 from services.ledger_service import (
-    compute_holdings,
     execute_trade,
-    get_user_balance,
 )
-from services.price_service import get_market_data, get_price
+from services.portfolio_service import get_portfolio_history, get_portfolio_snapshot
+from services.price_service import get_historical_prices, get_market_data, get_price
 from services.symbol_to_cg_id import CMC_TO_CG
 
 
@@ -50,9 +49,19 @@ def _decimal_response(value: Decimal) -> str:
     return str(value)
 
 
+def _serialize_decimals(value):
+    if isinstance(value, Decimal):
+        return _decimal_response(value)
+    if isinstance(value, list):
+        return [_serialize_decimals(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _serialize_decimals(item) for key, item in value.items()}
+    return value
+
+
 @app.get("/api/market")
 async def get_market():
-    return await get_market_data()
+    return _serialize_decimals(await get_market_data())
 
 
 @app.get("/api/coin/{symbol}")
@@ -68,52 +77,42 @@ async def get_coin_detail(symbol: str, days: str = "7"):
 
     try:
         price = await get_price(mapped_id)
+        prices = await get_historical_prices(mapped_id, days)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    chart_prices = _serialize_decimals(prices)
     return {
         "coingecko_id": mapped_id,
         "symbol": display_symbol,
         "price": _decimal_response(price),
-        "history": [],
+        "prices": chart_prices,
+        "history": chart_prices,
         "change_24h": "0",
     }
 
 
 @app.get("/api/user/{username}")
 async def get_user(username: str):
-    balance = get_user_balance(username)
-    holdings = compute_holdings(username)
-    total_value = Decimal("0")
-    holding_rows = []
+    try:
+        return await get_portfolio_snapshot(username)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    for coingecko_id, quantity in holdings.items():
-        price = await get_price(coingecko_id)
-        value = quantity * price
-        total_value += value
-        holding_rows.append(
-            {
-                "coingecko_id": coingecko_id,
-                "symbol": coingecko_id.upper(),
-                "amount": _decimal_response(quantity),
-                "value": _decimal_response(value),
-                "price": _decimal_response(price),
-                "history": [],
-            }
-        )
 
-    return {
-        "balance_usd": _decimal_response(balance),
-        "net_worth": _decimal_response(total_value + balance),
-        "holdings": holding_rows,
-        "watchlist": [],
-    }
+@app.get("/api/portfolio/{username}/history")
+async def get_portfolio_history_endpoint(username: str, days: str = "30"):
+    try:
+        return await get_portfolio_history(username, days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/portfolio/history/{username}")
-def get_portfolio_history(username: str, days: str = "7"):
-    _ = username
-    _ = days
-    return []
+async def get_legacy_portfolio_history_endpoint(username: str, days: str = "30"):
+    try:
+        return await get_portfolio_history(username, days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/trade/buy")

@@ -1,6 +1,4 @@
-//to start app backend: uvicorn main:app --reload
-//run in frontend terminal: cd frontend and then npm run dev
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   TrendingUp,
@@ -9,7 +7,7 @@ import {
   Bell,
   Settings,
   ArrowLeft,
-  BrainCircuit
+  BrainCircuit,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -20,11 +18,16 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
-  CartesianGrid
+  CartesianGrid,
 } from 'recharts';
+import { useTradingStore } from './store/useTradingStore';
 import './App.css';
 
-// --- COMPONENTS ---
+const formatCurrency = (value, options = {}) =>
+  Number(value || 0).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+    ...options,
+  });
 
 const TimeSelector = ({ active, onChange }) => (
   <div className="time-selector">
@@ -40,118 +43,124 @@ const TimeSelector = ({ active, onChange }) => (
   </div>
 );
 
-// --- MAIN APP ---
+const EmptyChart = ({ children }) => (
+  <div className="empty-chart">{children || 'No chart data available yet.'}</div>
+);
+
+const TradeModal = ({ action, coin, loading, error, onClose, onSubmit }) => {
+  const [quantity, setQuantity] = useState('');
+
+  if (!action || !coin) return null;
+
+  const label = action === 'buy' ? 'Buy' : 'Sell';
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="trade-modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{label} {coin.symbol}</h3>
+          <button onClick={onClose}>x</button>
+        </div>
+        <label className="trade-input-label" htmlFor="trade-quantity">
+          Quantity
+        </label>
+        <input
+          id="trade-quantity"
+          type="number"
+          min="0"
+          step="any"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          autoFocus
+        />
+        {error && <p className="modal-error">{error}</p>}
+        <div className="modal-actions">
+          <button onClick={onClose} className="btn-secondary">Cancel</button>
+          <button
+            onClick={() => onSubmit(quantity)}
+            disabled={loading || !quantity}
+            className={action === 'buy' ? 'btn-buy' : 'btn-sell'}
+          >
+            {loading ? 'Working...' : label}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [user, setUser] = useState(null);
-  const [market, setMarket] = useState([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [timeframe, setTimeframe] = useState('7');
+  const [portTimeframe, setPortTimeframe] = useState('30');
+  const [tradeAction, setTradeAction] = useState(null);
+  const lastTimeframeRef = useRef(timeframe);
 
-  // Market Detail State
-  const [selectedCoin, setSelectedCoin] = useState(null);
-  const [coinHistory, setCoinHistory] = useState([]);
-  const [timeframe, setTimeframe] = useState("7");
-  const [aiInsight, setAiInsight] = useState("");
-  const [loadingAi, setLoadingAi] = useState(false);
+  const {
+    market,
+    portfolio,
+    portfolioHistory,
+    portfolioHistoryMeta,
+    coinHistory,
+    selectedCoin,
+    aiInsight,
+    loadingAi,
+    loading,
+    error,
+    loadMarket,
+    loadPortfolio,
+    loadPortfolioHistory,
+    selectCoin,
+    clearSelectedCoin,
+    executeTrade,
+    getAiInsight,
+  } = useTradingStore();
 
-  // Portfolio Chart State
-  const [portHistory, setPortHistory] = useState([]);
-  const [portTimeframe, setPortTimeframe] = useState("30");
+  useEffect(() => {
+    loadMarket();
+    loadPortfolio();
+  }, [loadMarket, loadPortfolio]);
 
-  // --- API CALLS ---
+  useEffect(() => {
+    loadPortfolioHistory(portTimeframe);
+  }, [loadPortfolioHistory, portTimeframe]);
 
-  const refreshData = async () => {
-    try {
-      const uRes = await fetch("http://127.0.0.1:8000/api/user/Do");
-      setUser(await uRes.json());
-      const mRes = await fetch("http://127.0.0.1:8000/api/market");
-      setMarket(await mRes.json());
-    } catch (e) {
-      console.error("API Error", e);
+  useEffect(() => {
+    if (!selectedCoin || lastTimeframeRef.current === timeframe) {
+      return;
     }
+    lastTimeframeRef.current = timeframe;
+    selectCoin(selectedCoin, timeframe);
+  }, [selectedCoin, selectCoin, timeframe]);
+
+  const openCoin = async (coin) => {
+    lastTimeframeRef.current = timeframe;
+    await selectCoin(coin, timeframe);
+    setActiveTab('market');
   };
 
-  const fetchPortHistory = async (days) => {
-    try {
-      const res = await fetch(`http://127.0.0.1:8000/api/portfolio/history/Do?days=${days}`);
-      setPortHistory(await res.json());
-    } catch(e) {}
-  };
-
-  useEffect(() => {
-    refreshData();
-    fetchPortHistory("30");
-  }, []);
-
-  useEffect(() => {
-    if (selectedCoin) {
-      fetch(`http://127.0.0.1:8000/api/coin/${selectedCoin.symbol}?days=${timeframe}`)
-        .then(r => r.json())
-        .then(d => setCoinHistory(d.history));
-    }
-  }, [selectedCoin, timeframe]);
-
-  useEffect(() => {
-    fetchPortHistory(portTimeframe);
-  }, [portTimeframe]);
-
-  // --- HANDLERS ---
-
-  const handleSearch = (e) => {
+  const handleSearch = async (e) => {
     e.preventDefault();
-    if (!market.length) return;
+    if (!searchQuery.trim()) return;
 
-    const found = market.find(c => c.symbol === searchQuery.toUpperCase());
-    if (found) {
-      setSelectedCoin({ symbol: found.symbol, price: found.quote.USD.price });
-      setActiveTab("market");
-      setSearchQuery("");
-    } else {
-      // Fallback if not in top list, still try to open details
-      setSelectedCoin({ symbol: searchQuery.toUpperCase(), price: 0 });
-      setActiveTab("market");
-      setSearchQuery("");
+    const symbol = searchQuery.trim().toUpperCase();
+    const found = market.find((coin) => coin.symbol === symbol);
+    await openCoin(found || { symbol, price: 0 });
+    setSearchQuery('');
+  };
+
+  const handleTrade = async (quantity) => {
+    try {
+      await executeTrade({ action: tradeAction, quantity, historyDays: portTimeframe });
+      setTradeAction(null);
+    } catch {
+      // Store owns the visible error state.
     }
   };
-
-  const executeTrade = async (type, amountStr) => {
-    if (!amountStr || !selectedCoin) return;
-    const amount = parseFloat(amountStr);
-    if (isNaN(amount)) return;
-
-    await fetch(`http://127.0.0.1:8000/api/trade/${type}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: "Do",
-        symbol: selectedCoin.symbol,
-        amount,
-        price: selectedCoin.price
-      })
-    });
-    refreshData();
-    alert(`Successfully ${type === 'buy' ? 'bought' : 'sold'} ${amount} ${selectedCoin.symbol}`);
-  };
-
-  const getAiInsight = async () => {
-    if (!selectedCoin) return;
-    setLoadingAi(true);
-    const res = await fetch("http://127.0.0.1:8000/api/ai/insight", {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: selectedCoin.symbol })
-    });
-    const data = await res.json();
-    setAiInsight(data.answer);
-    setLoadingAi(false);
-  };
-
-  // --- RENDER ---
 
   return (
     <div className="app-layout">
-
-      {/* SIDEBAR */}
       <aside className="sidebar">
         <div className="logo-area">
           <div className="logo-icon">TN</div>
@@ -181,10 +190,7 @@ export default function App() {
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
       <main className="main-content">
-
-        {/* GLOBAL HEADER */}
         <header className="global-header">
           <form onSubmit={handleSearch} className="search-bar">
             <Search size={18} className="search-icon" />
@@ -192,7 +198,7 @@ export default function App() {
               type="text"
               placeholder="Search assets (e.g. BTC, ETH)..."
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={(e) => setSearchQuery(e.target.value)}
             />
           </form>
           <div className="header-actions">
@@ -201,11 +207,10 @@ export default function App() {
           </div>
         </header>
 
-        {/* SCROLLABLE VIEW */}
         <div className="content-area">
+          {error && <div className="error-banner">{error}</div>}
 
-          {/* DASHBOARD TAB */}
-          {activeTab === 'dashboard' && user && (
+          {activeTab === 'dashboard' && portfolio && (
             <div className="view-dashboard">
               <div className="page-header">
                 <h1>Overview</h1>
@@ -217,29 +222,25 @@ export default function App() {
                   <div className="stat-icon-box"><TrendingUp size={24} /></div>
                   <div className="stat-info">
                     <h3>Total Net Worth</h3>
-                    <p className="stat-value">${user.net_worth.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                    <p className="stat-value">${formatCurrency(portfolio.net_worth, { maximumFractionDigits: 0 })}</p>
                   </div>
                 </div>
                 <div className="card stat-card">
                   <div className="stat-icon-box"><Wallet size={24} /></div>
                   <div className="stat-info">
                     <h3>Cash Balance</h3>
-                    <p className="stat-value">${user.balance_usd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+                    <p className="stat-value">${formatCurrency(portfolio.cash_balance, { maximumFractionDigits: 0 })}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Top Movers Grid */}
               <div className="card movers-section">
                 <h2>Market Movers</h2>
                 <div className="movers-grid">
-                  {market.slice(0, 4).map(coin => (
+                  {market.slice(0, 4).map((coin) => (
                     <div
-                      key={coin.id}
-                      onClick={() => {
-                        setSelectedCoin({ symbol: coin.symbol, price: coin.quote.USD.price });
-                        setActiveTab('market');
-                      }}
+                      key={coin.coingecko_id}
+                      onClick={() => openCoin(coin)}
                       className="mover-card"
                     >
                       <div className="mover-top">
@@ -248,7 +249,7 @@ export default function App() {
                           {coin.quote.USD.percent_change_24h.toFixed(2)}%
                         </span>
                       </div>
-                      <div className="mover-price">${coin.quote.USD.price.toLocaleString()}</div>
+                      <div className="mover-price">${formatCurrency(coin.quote.USD.price)}</div>
                     </div>
                   ))}
                 </div>
@@ -256,87 +257,70 @@ export default function App() {
             </div>
           )}
 
-          {/* MARKET TAB */}
           {activeTab === 'market' && (
             <div className="view-market">
               {selectedCoin ? (
-                // DETAIL VIEW
                 <div className="detail-layout">
-                  <button onClick={() => setSelectedCoin(null)} className="back-btn">
+                  <button onClick={clearSelectedCoin} className="back-btn">
                     <ArrowLeft size={16} /> Back to List
                   </button>
 
                   <div className="detail-content">
-                    {/* CHART SECTION */}
                     <div className="card detail-chart-card">
                       <div className="chart-header">
                         <div>
                           <h1>{selectedCoin.symbol}</h1>
-                          <p className="detail-price">${selectedCoin.price ? selectedCoin.price.toLocaleString() : "..."}</p>
+                          <p className="detail-price">${formatCurrency(selectedCoin.price)}</p>
                         </div>
                         <TimeSelector active={timeframe} onChange={setTimeframe} />
                       </div>
                       <div className="chart-container">
-                        <ResponsiveContainer width="100%" height={300}>
-                          <AreaChart data={coinHistory}>
-                            <defs>
-                              <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                                <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                              </linearGradient>
-                            </defs>
-                            <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333' }} />
-                            <Area type="monotone" dataKey="price" stroke="#10b981" fill="url(#colorPrice)" />
-                            <XAxis dataKey="time" hide />
-                            <YAxis hide domain={['auto', 'auto']} />
-                          </AreaChart>
-                        </ResponsiveContainer>
+                        {coinHistory.length ? (
+                          <ResponsiveContainer width="100%" height={300}>
+                            <AreaChart data={coinHistory}>
+                              <defs>
+                                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                </linearGradient>
+                              </defs>
+                              <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333' }} />
+                              <Area type="monotone" dataKey="price" stroke="#10b981" fill="url(#colorPrice)" />
+                              <XAxis dataKey="time" hide />
+                              <YAxis hide domain={['auto', 'auto']} />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <EmptyChart>{loading.coinHistory ? 'Loading chart...' : 'No price history available.'}</EmptyChart>
+                        )}
                       </div>
                     </div>
 
-                    {/* SIDEBAR ACTIONS */}
                     <div className="detail-sidebar">
-                      {/* TRADE CARD */}
                       <div className="card trade-card">
                         <h3>Trade {selectedCoin.symbol}</h3>
                         <div className="trade-buttons">
-                          <button
-                            onClick={() => executeTrade('buy', prompt("Enter USD amount to BUY:"))}
-                            className="btn-buy"
-                          >
-                            Buy
-                          </button>
-                          <button
-                            onClick={() => executeTrade('sell', prompt(`Enter ${selectedCoin.symbol} amount to SELL:`))}
-                            className="btn-sell"
-                          >
-                            Sell
-                          </button>
+                          <button onClick={() => setTradeAction('buy')} className="btn-buy">Buy</button>
+                          <button onClick={() => setTradeAction('sell')} className="btn-sell">Sell</button>
                         </div>
                       </div>
 
-                      {/* AI CARD */}
                       <div className="card ai-card">
                         <div className="ai-title">
                           <BrainCircuit size={20} />
                           <h3>AI Analysis</h3>
                         </div>
                         <div className="ai-body">
-                          {aiInsight || "Click generate to analyze current market sentiment."}
+                          {aiInsight || 'Click generate to analyze current market sentiment.'}
                         </div>
-                        <button
-                          onClick={getAiInsight}
-                          disabled={loadingAi}
-                          className="btn-ai"
-                        >
-                          {loadingAi ? "Analyzing..." : "Generate Insight"}
+                        <button onClick={getAiInsight} disabled={loadingAi} className="btn-ai">
+                          {loadingAi ? 'Analyzing...' : 'Generate Insight'}
                         </button>
                       </div>
                     </div>
                   </div>
                 </div>
               ) : (
-                // LIST VIEW
                 <div className="card market-list">
                   <table className="market-table">
                     <thead>
@@ -348,11 +332,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {market.map(coin => (
-                        <tr
-                          key={coin.id}
-                          onClick={() => { setSelectedCoin({ symbol: coin.symbol, price: coin.quote.USD.price }); }}
-                        >
+                      {market.map((coin) => (
+                        <tr key={coin.coingecko_id} onClick={() => openCoin(coin)}>
                           <td className="coin-cell">
                             <div className="coin-icon">{coin.symbol[0]}</div>
                             <div>
@@ -360,7 +341,7 @@ export default function App() {
                               <span className="coin-sym">{coin.symbol}</span>
                             </div>
                           </td>
-                          <td>${coin.quote.USD.price.toLocaleString()}</td>
+                          <td>${formatCurrency(coin.quote.USD.price)}</td>
                           <td className={coin.quote.USD.percent_change_24h >= 0 ? 'pos' : 'neg'}>
                             {coin.quote.USD.percent_change_24h.toFixed(2)}%
                           </td>
@@ -374,85 +355,87 @@ export default function App() {
             </div>
           )}
 
-          {/* PORTFOLIO TAB */}
-          {activeTab === 'portfolio' && user && (
+          {activeTab === 'portfolio' && portfolio && (
             <div className="view-portfolio">
-
-              {/* Main Growth Chart */}
               <div className="card portfolio-chart-card">
                 <div className="chart-header">
                   <div>
                     <h2>Portfolio Performance</h2>
-                    <p className="detail-price">${user.net_worth.toLocaleString()}</p>
+                    <p className="detail-price">${formatCurrency(portfolio.net_worth)}</p>
+                    {portfolioHistoryMeta?.approximation && (
+                      <p className="chart-note">Approximate: current holdings times historical prices.</p>
+                    )}
                   </div>
                   <TimeSelector active={portTimeframe} onChange={setPortTimeframe} />
                 </div>
                 <div className="chart-container">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <AreaChart data={portHistory}>
-                      <defs>
-                        <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
-                      <XAxis dataKey="time" tick={{fill: '#525252', fontSize: 12}} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333' }} />
-                      <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#colorNet)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  {portfolioHistory.length ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <AreaChart data={portfolioHistory}>
+                        <defs>
+                          <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#262626" vertical={false} />
+                        <XAxis dataKey="time" tick={{ fill: '#525252', fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: '#171717', border: '1px solid #333' }} />
+                        <Area type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} fill="url(#colorNet)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <EmptyChart>{loading.portfolioHistory ? 'Loading portfolio chart...' : 'No portfolio history yet.'}</EmptyChart>
+                  )}
                 </div>
               </div>
 
-              {/* Holdings List with Sparklines */}
               <div className="holdings-list">
-                {user.holdings.map((h) => (
-                  <div key={h.symbol} className="card holding-item">
-
-                    {/* Left: Info */}
+                {portfolio.holdings.length ? portfolio.holdings.map((holding) => (
+                  <div key={holding.coingecko_id} className="card holding-item">
                     <div className="holding-info">
-                      <div className="coin-icon">{h.symbol[0]}</div>
+                      <div className="coin-icon">{holding.symbol[0]}</div>
                       <div>
-                        <div className="holding-sym">{h.symbol}</div>
-                        <div className="holding-amt">{h.amount.toFixed(4)} Coins</div>
+                        <div className="holding-sym">{holding.symbol}</div>
+                        <div className="holding-amt">{holding.quantity.toFixed(6)} Coins</div>
                       </div>
                     </div>
 
-                    {/* Middle: Sparkline Chart */}
                     <div className="holding-sparkline">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={h.history}>
-                          <Line type="monotone" dataKey="price" stroke="#10b981" strokeWidth={2} dot={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
+                      {holding.history.length ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={holding.history}>
+                            <Line type="monotone" dataKey="price" stroke="#10b981" strokeWidth={2} dot={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : null}
                     </div>
 
-                    {/* Right: Value & Actions */}
                     <div className="holding-actions">
                       <div className="text-right">
-                        <div className="holding-val">${h.value.toLocaleString()}</div>
+                        <div className="holding-val">${formatCurrency(holding.market_value)}</div>
                         <div className="holding-label">Current Value</div>
                       </div>
-                      <button
-                        onClick={() => {
-                          setSelectedCoin({ symbol: h.symbol, price: h.price });
-                          setActiveTab('market');
-                        }}
-                        className="btn-trade-small"
-                      >
-                        Trade
-                      </button>
+                      <button onClick={() => openCoin(holding)} className="btn-trade-small">Trade</button>
                     </div>
-
                   </div>
-                ))}
+                )) : (
+                  <div className="card empty-holdings">No holdings yet.</div>
+                )}
               </div>
             </div>
           )}
-
         </div>
       </main>
+
+      <TradeModal
+        action={tradeAction}
+        coin={selectedCoin}
+        loading={loading.trade}
+        error={error}
+        onClose={() => setTradeAction(null)}
+        onSubmit={handleTrade}
+      />
     </div>
   );
 }

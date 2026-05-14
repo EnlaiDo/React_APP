@@ -130,3 +130,109 @@ body {
 .holding-val { font-weight: bold; font-size: 1.1rem; }
 .holding-label { font-size: 0.8rem; color: var(--text-muted); }
 .btn-trade-small { background: var(--bg-hover); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+
+.error-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.empty-chart,
+.empty-holdings {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.empty-holdings {
+  padding: 24px;
+}
+
+.chart-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 4px 0 0 0;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.trade-modal {
+  width: min(360px, calc(100vw - 32px));
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 {
+  margin: 0;
+}
+
+.modal-header button,
+.btn-secondary {
+  background: var(--bg-hover);
+  color: white;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.trade-input-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.trade-modal input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: white;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.trade-modal input:focus {
+  border-color: var(--primary);
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.modal-actions button {
+  flex: 1;
+}
+
+.modal-error {
+  color: #fca5a5;
+  font-size: 0.85rem;
+  margin: 10px 0 0 0;
+}

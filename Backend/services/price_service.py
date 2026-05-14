@@ -14,9 +14,11 @@ from services.symbol_to_cg_id import CMC_TO_CG
 COINGECKO_BASE_URL = "https://api.coingecko.com/api/v3"
 PRICE_TTL_SECONDS = 60
 MARKET_TTL_SECONDS = 120
+HISTORY_TTL_SECONDS = 300
 _semaphore = asyncio.Semaphore(5)
 _price_cache: dict[str, tuple[int, Decimal]] = {}
 _market_cache: Optional[tuple[int, list[dict[str, Any]]]] = None
+_history_cache: dict[tuple[str, str], tuple[int, list[dict[str, Any]]]] = {}
 
 
 def _now_ns() -> int:
@@ -32,6 +34,15 @@ def _to_decimal(value: Any) -> Decimal:
 
 def _cache_valid(cached_at: int, ttl_seconds: int) -> bool:
     return _now_ns() - cached_at < ttl_seconds * 1_000_000_000
+
+
+def _normalize_coingecko_id(coingecko_id: str) -> str:
+    normalized_id = coingecko_id.strip().lower()
+    if not normalized_id:
+        raise ValueError("Invalid coingecko_id")
+    if normalized_id.upper() in CMC_TO_CG:
+        raise ValueError("Invalid coingecko_id")
+    return normalized_id
 
 
 def _symbol_for_coingecko_id(coingecko_id: str) -> Optional[str]:
@@ -51,12 +62,7 @@ async def _coingecko_get(path: str, params: dict[str, Any]) -> Any:
 
 
 async def get_price(coingecko_id: str) -> Decimal:
-    normalized_id = coingecko_id.strip().lower()
-    if not normalized_id:
-        raise ValueError("Invalid coingecko_id")
-    if normalized_id.upper() in CMC_TO_CG:
-        raise ValueError("Invalid coingecko_id")
-
+    normalized_id = _normalize_coingecko_id(coingecko_id)
     cached = _price_cache.get(normalized_id)
     if cached and _cache_valid(cached[0], PRICE_TTL_SECONDS):
         return cached[1]
@@ -102,6 +108,85 @@ async def get_price(coingecko_id: str) -> Decimal:
 
     _price_cache[normalized_id] = (_now_ns(), price)
     return price
+
+
+async def get_prices(coingecko_ids: list[str]) -> dict[str, Decimal]:
+    normalized_ids = []
+    for coingecko_id in coingecko_ids:
+        normalized_id = _normalize_coingecko_id(coingecko_id)
+        if normalized_id not in normalized_ids:
+            normalized_ids.append(normalized_id)
+
+    prices: dict[str, Decimal] = {}
+    uncached_ids = []
+    for coingecko_id in normalized_ids:
+        cached = _price_cache.get(coingecko_id)
+        if cached and _cache_valid(cached[0], PRICE_TTL_SECONDS):
+            prices[coingecko_id] = cached[1]
+        else:
+            uncached_ids.append(coingecko_id)
+
+    if not uncached_ids:
+        return prices
+
+    try:
+        data = await _coingecko_get(
+            "/simple/price",
+            {"ids": ",".join(uncached_ids), "vs_currencies": "usd"},
+        )
+        missing_ids = [coingecko_id for coingecko_id in uncached_ids if coingecko_id not in data]
+        if missing_ids:
+            raise KeyError(", ".join(missing_ids))
+        for coingecko_id in uncached_ids:
+            if "usd" not in data[coingecko_id]:
+                raise ValueError(f"Price unavailable: missing USD quote for {coingecko_id}")
+            price = _to_decimal(data[coingecko_id]["usd"])
+            _price_cache[coingecko_id] = (_now_ns(), price)
+            prices[coingecko_id] = price
+    except KeyError as exc:
+        raise ValueError("Invalid coingecko_id") from exc
+    except httpx.HTTPStatusError:
+        for coingecko_id in uncached_ids:
+            prices[coingecko_id] = await get_price(coingecko_id)
+    except httpx.TimeoutException:
+        for coingecko_id in uncached_ids:
+            prices[coingecko_id] = await get_price(coingecko_id)
+    except httpx.RequestError:
+        for coingecko_id in uncached_ids:
+            prices[coingecko_id] = await get_price(coingecko_id)
+
+    return prices
+
+
+async def get_historical_prices(coingecko_id: str, days: str = "7") -> list[dict[str, Any]]:
+    normalized_id = _normalize_coingecko_id(coingecko_id)
+    normalized_days = days.strip() if days else "7"
+    cache_key = (normalized_id, normalized_days)
+    cached = _history_cache.get(cache_key)
+    if cached and _cache_valid(cached[0], HISTORY_TTL_SECONDS):
+        return cached[1]
+
+    try:
+        data = await _coingecko_get(
+            f"/coins/{normalized_id}/market_chart",
+            {"vs_currency": "usd", "days": normalized_days},
+        )
+        prices = [
+            {"timestamp": int(timestamp), "price": _to_decimal(price)}
+            for timestamp, price in data.get("prices", [])
+        ]
+    except httpx.HTTPStatusError as exc:
+        raise ValueError(f"History unavailable: HTTP {exc.response.status_code}") from exc
+    except httpx.TimeoutException as exc:
+        raise ValueError("History unavailable: CoinGecko timeout") from exc
+    except httpx.RequestError as exc:
+        raise ValueError(f"History unavailable: {exc}") from exc
+
+    if not prices:
+        raise ValueError("History unavailable: empty price series")
+
+    _history_cache[cache_key] = (_now_ns(), prices)
+    return prices
 
 
 def _normalize_cmc_market(data: list[dict[str, Any]]) -> list[dict[str, Any]]:
